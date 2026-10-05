@@ -45,6 +45,11 @@
   .panel h3 { margin: 0 0 8px; font-size: 16px; }
   .panel ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 15px; }
   .panel li { margin: 4px 0; }
+  .build { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px 18px 18px; }
+  .build dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 14px 0 0; font-size: 15px; }
+  .build dt { font-weight: 600; white-space: nowrap; }
+  .build dd { margin: 0; color: var(--muted); }
+  .done { color: var(--accent); font-weight: 600; }
   footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px;
            display: flex; flex-wrap: wrap; gap: 8px 20px; }
   footer a { color: var(--ink); }
@@ -55,18 +60,18 @@
   <div class="eyebrow">System design showcase</div>
   <h1>Fashion E-Commerce Platform</h1>
   <p class="lede">A microservices backend for an Indian streetwear brand: 10 NestJS services behind one API gateway, on
-    PostgreSQL and Redis, in an Nx monorepo. The foundation, the authentication service and the gateway are built and
-    tested. The remaining services are designed and in progress.</p>
+    PostgreSQL and Redis, in an Nx monorepo. The foundation, the authentication service, the gateway, the catalog pair
+    and the image service are built and tested. The order, payment and notification services are designed and next.</p>
   <span class="note">The source code is private. These pages show the architecture and design.</span>
 
   <h2>At a glance</h2>
   <div class="stats">
-    <div class="stat"><b>16</b><span>auth-service REST endpoints</span></div>
+    <div class="stat"><b>5 of 11</b><span>launch services built and tested</span></div>
+    <div class="stat"><b>49</b><span>REST endpoints live behind the gateway</span></div>
     <div class="stat"><b>18 &rarr; 7</b><span>gateway route prefixes to services</span></div>
-    <div class="stat"><b>20</b><span>PostgreSQL tables over 11 migrations</span></div>
-    <div class="stat"><b>47</b><span>database constraints, each tested in CI</span></div>
-    <div class="stat"><b>655</b><span>tests: 617 unit/integration + 38 E2E</span></div>
-    <div class="stat"><b>43</b><span>merged pull requests</span></div>
+    <div class="stat"><b>20</b><span>PostgreSQL tables over 12 migrations</span></div>
+    <div class="stat"><b>823</b><span>test cases across 127 spec files</span></div>
+    <div class="stat"><b>119</b><span>merged pull requests</span></div>
   </div>
 
   <h2>Diagrams</h2>
@@ -74,13 +79,25 @@
     <a class="card" href="system-architecture.html">
       <div class="kind">Architecture</div>
       <h3>System architecture</h3>
-      <p>All services, the gateway, Redis and Razorpay, with the request, money and housekeeping paths.</p>
+      <p>Every service, the gateway, Redis, R2 and Razorpay, and which of them are built today.</p>
       <div class="go">Open diagram &rarr;</div>
     </a>
     <a class="card" href="auth-service.html">
       <div class="kind">Architecture</div>
       <h3>Authentication service</h3>
       <p>OTP, password and Google sign-in, sessions in Redis, and token validation for the gateway.</p>
+      <div class="go">Open diagram &rarr;</div>
+    </a>
+    <a class="card" href="catalog-services.html">
+      <div class="kind">Architecture</div>
+      <h3>Catalog and images</h3>
+      <p>The CQRS split, the Redis cache, Cloudflare R2, and the channel that ties a write to a cache bust.</p>
+      <div class="go">Open diagram &rarr;</div>
+    </a>
+    <a class="card" href="catalog-invalidation.html">
+      <div class="kind">Sequence</div>
+      <h3>Image upload and cache bust</h3>
+      <p>Sharp to WebP into R2, the image row, and the invalidation that clears the cached pages twice.</p>
       <div class="go">Open diagram &rarr;</div>
     </a>
     <a class="card" href="checkout-sequence.html">
@@ -103,6 +120,22 @@
     </a>
   </div>
 
+  <h2>Build status</h2>
+  <div class="build">
+    <dl>
+      <dt><span class="done">P0 &middot; done</span></dt>
+      <dd>Nx workspace, 12 apps and 6 packages, Docker Compose, CI on Node 22, the Prisma schema and its migrations.</dd>
+      <dt><span class="done">P1 &middot; done</span></dt>
+      <dd>auth-service and api-gateway, proved end to end: a customer signs in with an OTP, refreshes and loads their profile through the gateway.</dd>
+      <dt><span class="done">P2 &middot; done</span></dt>
+      <dd>catalog-command, catalog-query and files-service. The admin API creates a product with variants and images, the public API lists, filters and searches it, and a write busts the cache within a second.</dd>
+      <dt>P3 &middot; next</dt>
+      <dd>order-service, payment-service and the tax module. Prepaid only, so an order is confirmed only after Razorpay reports a successful capture.</dd>
+      <dt>After launch</dt>
+      <dd>realtime-service and the mobile app. Until then, order updates go out by SMS and email.</dd>
+    </dl>
+  </div>
+
   <h2>Engineering highlights</h2>
   <div class="cols">
     <div class="panel">
@@ -122,11 +155,35 @@
       </ul>
     </div>
     <div class="panel">
+      <h3>Catalog, split read from write</h3>
+      <ul>
+        <li>catalog-command owns the writes; catalog-query owns reads, search and the cache</li>
+        <li>A write publishes on <code>catalog:invalidate</code>; the subscriber handles each message twice, 5 s apart</li>
+        <li>Reservation keys on the inventory ledger make a repeated stock reservation safe</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Images</h3>
+      <ul>
+        <li>files-service converts every upload to WebP with Sharp and stores it in Cloudflare R2</li>
+        <li>It publishes its own cache bust, so a new image shows up without a catalog write</li>
+        <li>A publish locks the product row, so it cannot race the delete of a last image</li>
+      </ul>
+    </div>
+    <div class="panel">
       <h3>Data and delivery</h3>
       <ul>
-        <li>CHECK constraints for money in paise, stock and returns, enforced in the database</li>
+        <li>45 CHECK constraints and 26 unique indexes for money in paise, stock and returns</li>
         <li>CI with Postgres and Redis containers and a migration-drift check</li>
         <li>10 service design docs and 3 architecture decision records</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Service boundaries</h3>
+      <ul>
+        <li>Services trust identity headers only with the gateway's secret, checked by a shared guard</li>
+        <li>Internal routes answer 404 for anything arriving from outside</li>
+        <li>Nx module boundaries are enforced in CI, so a service cannot import another's internals</li>
       </ul>
     </div>
   </div>
@@ -135,7 +192,8 @@
   <div class="chips">
     <span class="chip">TypeScript</span><span class="chip">NestJS 11</span><span class="chip">Next.js 16</span>
     <span class="chip">React 19</span><span class="chip">PostgreSQL 15</span><span class="chip">Prisma 7</span>
-    <span class="chip">Redis 7 + Lua</span><span class="chip">JWT + OAuth 2.0 (PKCE)</span><span class="chip">Nx monorepo</span>
+    <span class="chip">Redis 7 + Lua</span><span class="chip">JWT + OAuth 2.0 (PKCE)</span><span class="chip">Sharp</span>
+    <span class="chip">Cloudflare R2</span><span class="chip">Nx monorepo</span>
     <span class="chip">Jest</span><span class="chip">Playwright</span><span class="chip">GitHub Actions</span>
     <span class="chip">Docker Compose</span>
   </div>
